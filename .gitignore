@@ -3,3 +3,4 @@ server.mfl
 app.wasm
 cvboost
 src/host_gen.src
+cvboost-static

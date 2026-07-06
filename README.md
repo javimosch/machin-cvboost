@@ -44,3 +44,13 @@ Started from [boilerplate-cli-ui-machin-isomorphic](https://github.com/javimosch
 ## License
 
 MIT
+
+## Deploy (production)
+
+- **App**: dk1 `/home/dk1/cvboost-app/` (static binary + app.wasm), exposed at
+  **cvboost.intrane.fr** via hotify-cli (Traefik + Cloudflare + Let's Encrypt).
+  `CVBOOST_GH_TOKEN` in the hotify app command. Build: `machin build server.mfl --static -o cvboost-static`.
+- **Worker**: rbm21 `/root/co-cvboost` (`bash run.sh` → `mago serve --relay --supervise`),
+  agents `auditor` (sonnet, implements) + `reviewer` (sonnet, reviews), skill `cvboost-audit`.
+- **Audits repo**: [javimosch/cvboost-audits](https://github.com/javimosch/cvboost-audits) (public).
+- **Artifacts**: hart.intrane.fr, owner `cvboost`, artifact `audit-<issue>`.
