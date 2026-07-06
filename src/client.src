@@ -1,0 +1,7 @@
+// client.src — the wasm client. M1 is pure SSR (the marketing pages need no JS);
+// this stub keeps the wasm build green. M2 turns it into the audit status page:
+// signals over the audit state, polling /api/audit/<n> and patching the timeline.
+
+export func start() {
+    // nothing to hydrate yet — the landing and form pages are fully server-rendered
+}

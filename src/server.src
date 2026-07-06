@@ -1,0 +1,190 @@
+// server.src — the native binary: a CLI that runs an HTTP server. It serves the
+// SSR marketing site (works with no JS), its own wasm client, and the audit API.
+// Composed with machweb + flags + models + styles.
+
+var base_url = "https://cvboost.intrane.fr"
+
+// ---------- layout ----------
+
+func site_header() (h) {
+    h = "<header><div class=\"wrap nav\">"
+    h = h + "<a class=logo href=\"/\">CV<b>Boost</b></a>"
+    h = h + "<nav class=links><a href=\"/#comment\">Comment ça marche</a><a href=\"/#criteres\">Les 6 critères</a><a href=\"/#tarif\">Tarif</a><a href=\"/#public\">100 % public</a></nav>"
+    h = h + "<a class=btn href=\"/audit\">Auditer mon profil</a>"
+    h = h + "</div></header>"
+}
+
+func site_footer() (h) {
+    h = "<footer><div class=wrap>"
+    h = h + "<span>© 2026 CVBoost — un projet <a href=\"https://intrane.fr\">intrane.fr</a></span>"
+    h = h + "<span>Propulsé par <a href=\"https://mago.intrane.fr\">mago</a> · <a href=\"https://hart.intrane.fr\">hart</a> · <a href=\"https://github.com/javimosch/machin\">machin</a></span>"
+    h = h + "</div></footer>"
+}
+
+// layout wraps a page body with the SEO head (meta description, canonical, OpenGraph)
+// and the shared header/footer. Fully server-rendered — no JS required.
+func layout(title, desc, path, body) (h) {
+    h = "<!doctype html><html lang=fr><head><meta charset=utf-8>"
+    h = h + "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+    h = h + "<title>" + title + "</title>"
+    h = h + "<meta name=description content=\"" + desc + "\">"
+    h = h + "<link rel=canonical href=\"" + base_url + path + "\">"
+    h = h + "<meta property=og:title content=\"" + title + "\">"
+    h = h + "<meta property=og:description content=\"" + desc + "\">"
+    h = h + "<meta property=og:type content=website>"
+    h = h + "<meta property=og:url content=\"" + base_url + path + "\">"
+    h = h + "<meta property=og:locale content=fr_FR>"
+    h = h + "<meta name=twitter:card content=summary>"
+    h = h + styles() + "</head><body>"
+    h = h + site_header() + body + site_footer()
+    h = h + "</body></html>"
+}
+
+// ---------- landing sections ----------
+
+func hero() (h) {
+    h = "<div class=hero><div class=wrap>"
+    h = h + "<h1>Votre profil LinkedIn vous coûte des opportunités</h1>"
+    h = h + "<p class=lead>Collez votre profil, un agent autonome l'audite <b>en public</b> : score sur 100, 6 critères, diagnostic et plan d'action concret. Gratuit.</p>"
+    h = h + "<a class=\"btn big\" href=\"/audit\">Auditer mon profil — gratuit</a>"
+    h = h + "<p class=sub>Aucun mot de passe · Aucune inscription · Chaque audit est traçable sur GitHub</p>"
+    h = h + "</div></div>"
+}
+
+func strip() (h) {
+    h = "<div class=strip><div class=wrap>"
+    h = h + "<span>🔍 Audit complet en quelques minutes</span>"
+    h = h + "<span>🤖 Réalisé par un agent autonome <b>mago</b></span>"
+    h = h + "<span>🔗 Issue, pull request et rapport publics</span>"
+    h = h + "<span>🇫🇷 Pensé pour le marché tech français</span>"
+    h = h + "</div></div>"
+}
+
+func how_it_works() (h) {
+    h = "<section id=comment><div class=wrap>"
+    h = h + "<h2>Comment ça marche</h2>"
+    h = h + "<p class=sub>Trois étapes, zéro inscription. Vous suivez le travail de l'agent en direct sur GitHub.</p>"
+    h = h + "<div class=steps>"
+    h = h + "<div class=step><span class=k>1 · Gratuit</span><h3>Collez votre profil</h3><p>Le texte de votre titre, votre section À propos et vos expériences. Il est publié dans une issue GitHub publique — ne collez rien de privé.</p></div>"
+    h = h + "<div class=step><span class=k>2 · ~5 minutes</span><h3>Un agent mago l'analyse</h3><p>Un agent autonome prend l'issue, évalue les 6 critères et ouvre une pull request avec votre rapport. Vous pouvez le regarder travailler.</p></div>"
+    h = h + "<div class=step><span class=k>3 · Votre rapport</span><h3>Score, diagnostic, actions</h3><p>Score global sur 100, 6 sous-scores, un diagnostic en 3 phrases et des actions concrètes — plus un rapport HTML partageable.</p></div>"
+    h = h + "</div></div></section>"
+}
+
+func criteria() (h) {
+    h = "<section id=criteres><div class=wrap>"
+    h = h + "<h2>Les 6 critères évalués</h2>"
+    h = h + "<p class=sub>La grille qu'un recruteur senior applique — appliquée systématiquement à votre profil.</p>"
+    h = h + "<div class=crits>"
+    i := 0
+    while i < n_crits() {
+        h = h + "<div class=crit><h3>" + crit_name(i) + "</h3><p>" + crit_desc(i) + "</p></div>"
+        i = i + 1
+    }
+    h = h + "</div></div></section>"
+}
+
+func open_workflow() (h) {
+    h = "<section id=public class=open><div class=wrap>"
+    h = h + "<h2>100 % public, 100 % traçable</h2>"
+    h = h + "<p class=sub>Pas de boîte noire : chaque audit est une issue GitHub, une pull request et un artefact que n'importe qui peut consulter. C'est aussi une démonstration grandeur nature du workflow <a href=\"https://mago.intrane.fr\">mago</a> — des agents autonomes qui travaillent en public.</p>"
+    h = h + "<div class=flow>"
+    h = h + "<span class=node>📋 Issue GitHub</span><span class=arr>→</span>"
+    h = h + "<span class=node>🤖 Agent mago</span><span class=arr>→</span>"
+    h = h + "<span class=node>🔀 Pull request</span><span class=arr>→</span>"
+    h = h + "<span class=node>📄 Rapport HTML</span>"
+    h = h + "</div></div></section>"
+}
+
+func pricing() (h) {
+    h = "<section id=tarif><div class=wrap>"
+    h = h + "<h2>Tarif</h2>"
+    h = h + "<p class=sub>Tout est gratuit. Pas de version premium, pas de carte bancaire.</p>"
+    h = h + "<div class=price>"
+    h = h + "<h3>Audit complet</h3><div class=amount>0 € <small>/ audit</small></div>"
+    h = h + "<ul>"
+    h = h + "<li>Score global sur 100</li>"
+    h = h + "<li>6 sous-scores détaillés</li>"
+    h = h + "<li>Diagnostic en 3 phrases</li>"
+    h = h + "<li>Plan d'action concret</li>"
+    h = h + "<li>Rapport HTML partageable</li>"
+    h = h + "<li>Liens issue + pull request + artefact</li>"
+    h = h + "</ul>"
+    h = h + "<a class=\"btn big\" href=\"/audit\">Lancer mon audit gratuit</a>"
+    h = h + "</div>"
+    h = h + "<p class=why>Pourquoi gratuit ? CVBoost est une vitrine du workflow <a href=\"https://mago.intrane.fr\">mago</a> : les audits sont réalisés par des agents autonomes, en public. Votre audit est notre démo.</p>"
+    h = h + "</div></section>"
+}
+
+func landing() (h) {
+    h = layout(
+        "CVBoost — Audit gratuit de votre profil LinkedIn par un agent autonome",
+        "Collez votre profil LinkedIn, un agent autonome mago l'audite en public : score sur 100, 6 critères, diagnostic et plan d'action. Gratuit, sans inscription.",
+        "/",
+        hero() + strip() + how_it_works() + criteria() + open_workflow() + pricing())
+}
+
+// ---------- audit form ----------
+
+func audit_form() (h) {
+    b := "<section><div class=wrap>"
+    b = b + "<h2>Auditer mon profil LinkedIn</h2>"
+    b = b + "<p class=sub>Collez le texte de votre profil : titre, section À propos, expériences. Plus c'est complet, plus l'audit est précis.</p>"
+    b = b + "<div class=form-card>"
+    b = b + "<div class=notice><span>⚠️</span><span><b>Votre texte sera publié dans une issue GitHub publique</b> — c'est ce qui rend l'audit traçable. Ne collez pas d'informations privées (email, téléphone, adresse). Les profils LinkedIn sont déjà publics, mais relisez avant d'envoyer.</span></div>"
+    b = b + "<form method=post action=\"/api/audit\">"
+    b = b + "<textarea name=profile required minlength=200 placeholder=\"Titre :\nDéveloppeur Full-Stack | React &amp; Node.js\n\nÀ propos :\nPassionné par...\n\nExpériences :\n...\"></textarea>"
+    b = b + "<p style=\"margin:16px 0 0;text-align:center\"><button class=\"btn big\" type=submit>Lancer l'audit gratuit</button></p>"
+    b = b + "</form></div></div></section>"
+    h = layout(
+        "Lancer un audit — CVBoost",
+        "Collez le texte de votre profil LinkedIn et recevez un audit complet réalisé en public par un agent autonome : score sur 100, 6 critères, plan d'action.",
+        "/audit",
+        b)
+}
+
+// ---------- SEO plumbing ----------
+
+func robots_txt() (s) {
+    s = "User-agent: *\nAllow: /\nSitemap: " + base_url + "/sitemap.xml\n"
+}
+
+func sitemap_xml() (s) {
+    s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    s = s + "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+    s = s + "<url><loc>" + base_url + "/</loc></url>"
+    s = s + "<url><loc>" + base_url + "/audit</loc></url>"
+    s = s + "</urlset>"
+}
+
+// ---------- routing ----------
+
+func handle(req) (res) {
+    if req.path == "/app.wasm" {
+        return ok_wasm(read_file_bytes("app.wasm"))   // one binary serves its own SPA
+    }
+    if req.path == "/robots.txt" { return ok_text(robots_txt()) }
+    if req.path == "/sitemap.xml" { return response("200 OK", "application/xml", sitemap_xml()) }
+    if req.path == "/audit" { return ok_html(audit_form()) }
+    if req.method == "POST" && has_prefix(req.path, "/api/audit") {
+        // M2 wires this to the GitHub issue pipeline.
+        return response("503 Service Unavailable", "text/plain; charset=utf-8", "Bientôt disponible — le pipeline d'audit arrive.")
+    }
+    if req.path == "/" { return ok_html(landing()) }
+    return not_found()
+}
+
+func main() {
+    fs := new_flags("cvboost")
+    fs = flag_int(fs, "port", "p", "48120", "HTTP port to listen on")
+    fs = flag_str(fs, "base-url", "b", "https://cvboost.intrane.fr", "canonical base URL (SEO tags, sitemap)")
+    fs = parse_flags(fs, args())
+    if flag_on(fs, "help") {
+        println(flag_usage(fs))
+        return
+    }
+    base_url = flag_get(fs, "base-url")
+    port := flag_int_val(fs, "port")
+    println("cvboost on http://localhost:" + str(port))
+    serve(port, func(req) { return handle(req) })
+}

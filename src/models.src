@@ -1,0 +1,31 @@
+// models.src — SHARED between the server and the wasm client (composed into both).
+// The audit schema: the 6 criteria every audit scores, plus small shared helpers.
+// No per-app state here — just the schema.
+
+var crit_names = []string{"Titre", "À propos", "Expériences", "Compétences", "Réseau", "Cohérence"}
+
+var crit_descs = []string{
+    "Optimisé pour la recherche et l'impact — ce que les recruteurs voient en premier.",
+    "Un pitch qui convainc en quelques lignes, pas une liste de buzzwords.",
+    "Quantifiées et orientées résultats — des chiffres, pas des responsabilités.",
+    "Visibles, validées, alignées avec le poste que vous visez.",
+    "Une activité qui reflète votre expertise, pas un compte dormant.",
+    "Un récit clair et crédible du début à la fin du profil.",
+}
+
+func n_crits() (n) { n = 6 }
+
+func crit_name(i) (s) { s = crit_names[i] }
+
+func crit_desc(i) (s) { s = crit_descs[i] }
+
+// ints_csv joins an int slice as "a,b,c".
+func ints_csv(xs) (s) {
+    s = ""
+    i := 0
+    while i < len(xs) {
+        if i > 0 { s = s + "," }
+        s = s + str(xs[i])
+        i = i + 1
+    }
+}
