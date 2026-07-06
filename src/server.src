@@ -230,7 +230,9 @@ func create_issue(profile) (c) {
     safe := replace(profile, "```", "'''")
     title := "Audit LinkedIn — demande du " + time_format(now(), "%d/%m/%Y %H:%M")
     ibody := "**Demande d'audit CVBoost** (via cvboost.intrane.fr)\n\n## Profil à auditer\n\n```\n" + safe + "\n```\n"
-    payload := "{\"title\":" + json(title) + ",\"body\":" + json(ibody) + ",\"labels\":[\"cvboost\"]}"
+    // labels: "cvboost" scopes the mago backlog (MAGO_TASK_LABEL); "project:cvboost-audits"
+    // routes the task to the registered project so the deliverable is a PR to this repo.
+    payload := "{\"title\":" + json(title) + ",\"body\":" + json(ibody) + ",\"labels\":[\"cvboost\",\"project:cvboost-audits\"]}"
     status, resp, herr := http_request("POST", gh_api() + "/issues", gh_hdrs(), payload)
     if herr != "" { c.errmsg = "github injoignable: " + herr  return }
     if status != 201 { c.errmsg = "github a répondu " + str(status)  return }
