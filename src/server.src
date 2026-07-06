@@ -2,7 +2,7 @@
 // SSR marketing site (works with no JS), its own wasm client, and the audit API.
 // Composed with machweb + flags + models + styles.
 
-var base_url = "https://cvboost.intrane.fr"
+var site_url = "https://cvboost.intrane.fr"
 
 // ---------- layout ----------
 
@@ -28,11 +28,11 @@ func layout(title, desc, path, body) (h) {
     h = h + "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
     h = h + "<title>" + title + "</title>"
     h = h + "<meta name=description content=\"" + desc + "\">"
-    h = h + "<link rel=canonical href=\"" + base_url + path + "\">"
+    h = h + "<link rel=canonical href=\"" + site_url + path + "\">"
     h = h + "<meta property=og:title content=\"" + title + "\">"
     h = h + "<meta property=og:description content=\"" + desc + "\">"
     h = h + "<meta property=og:type content=website>"
-    h = h + "<meta property=og:url content=\"" + base_url + path + "\">"
+    h = h + "<meta property=og:url content=\"" + site_url + path + "\">"
     h = h + "<meta property=og:locale content=fr_FR>"
     h = h + "<meta name=twitter:card content=summary>"
     h = h + styles() + "</head><body>"
@@ -143,17 +143,207 @@ func audit_form() (h) {
         b)
 }
 
+// ---------- audit pipeline ----------
+
+var gh_repo = "javimosch/cvboost-audits"
+var gh_token = ""
+var db = 0
+
+type AuditSt struct { state string  iu string  pu string  au string }
+
+type Created struct { n int  url string  errmsg string }
+
+type IComment struct { body string }
+
+func gh_api() (u) { u = "https://api.github.com/repos/" + gh_repo }
+
+func gh_hdrs() (hs) {
+    hs = []string{"Accept: application/vnd.github+json", "User-Agent: cvboost"}
+    if gh_token != "" { hs = append(hs, "Authorization: Bearer " + gh_token) }
+}
+
+// form_field reads one url-encoded field out of a form POST body ("a=1&b=2").
+func form_field(body, key) (v) {
+    for _, kv := range split(body, "&") {
+        eq := index(kv, "=")
+        if eq > 0 {
+            if substr(kv, 0, eq) == key { v = url_decode(substr(kv, eq + 1, len(kv))) }
+        }
+    }
+}
+
+// path_num parses a trailing integer path segment ("/audit/42" -> 42), -1 if invalid.
+func path_num(path, prefix) (n) {
+    n = 0 - 1
+    rest := substr(path, len(prefix), len(path))
+    qi := index(rest, "?")
+    if qi >= 0 { rest = substr(rest, 0, qi) }
+    if len(rest) == 0 { return }
+    if len(rest) > 9 { return }
+    i := 0
+    while i < len(rest) {
+        if index("0123456789", substr(rest, i, i + 1)) < 0 { return }
+        i = i + 1
+    }
+    n = parse_int(rest)
+}
+
+// ---- rate limit + status cache (SQLite serializes cross-goroutine access) ----
+
+func db_init(path) {
+    db = sqlite_open(path)
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS ratelimit(ip TEXT, ts INT)")
+    sqlite_exec(db, "CREATE TABLE IF NOT EXISTS cache(k TEXT PRIMARY KEY, ts INT, body TEXT)")
+}
+
+// rate_allow permits 3 audit creations per IP per hour.
+func rate_allow(ip) (ok) {
+    ok = 0
+    sqlite_exec(db, "DELETE FROM ratelimit WHERE ts < ?", []string{str(now() - 3600)})
+    rows := sqlite_query(db, "SELECT COUNT(*) AS c FROM ratelimit WHERE ip = ?", []string{ip})
+    c, cerr := json_get(rows, "[0].c")
+    if cerr != "" { return }
+    if parse_int(c) >= 3 { return }
+    sqlite_exec(db, "INSERT INTO ratelimit(ip, ts) VALUES(?, ?)", []string{ip, str(now())})
+    ok = 1
+}
+
+type CacheRow struct { ts int  body string }
+
+func cache_get(k, maxage) (body) {
+    rows := parse(sqlite_query(db, "SELECT ts, body FROM cache WHERE k = ?", []string{k}), []CacheRow{})
+    for _, row := range rows {
+        if now() - row.ts <= maxage { body = row.body }
+    }
+}
+
+func cache_put(k, body) {
+    sqlite_exec(db, "INSERT OR REPLACE INTO cache(k, ts, body) VALUES(?, ?, ?)", []string{k, str(now()), body})
+}
+
+// ---- GitHub integration ----
+
+// create_issue files the audit request as a public GitHub issue (label cvboost —
+// that's what the mago worker watches).
+func create_issue(profile) (c) {
+    c = Created{n: 0, url: "", errmsg: ""}
+    safe := replace(profile, "```", "'''")
+    title := "Audit LinkedIn — demande du " + time_format(now(), "%d/%m/%Y %H:%M")
+    ibody := "**Demande d'audit CVBoost** (via cvboost.intrane.fr)\n\n## Profil à auditer\n\n```\n" + safe + "\n```\n"
+    payload := "{\"title\":" + json(title) + ",\"body\":" + json(ibody) + ",\"labels\":[\"cvboost\"]}"
+    status, resp, herr := http_request("POST", gh_api() + "/issues", gh_hdrs(), payload)
+    if herr != "" { c.errmsg = "github injoignable: " + herr  return }
+    if status != 201 { c.errmsg = "github a répondu " + str(status)  return }
+    nraw, nerr := json_get(resp, ".number")
+    if nerr != "" { c.errmsg = "réponse github illisible"  return }
+    c.n = parse_int(nraw)
+    c.url = jfield(resp, ".html_url")
+}
+
+// find_url extracts the first URL following a marker ("Artifact:") in a text.
+func find_url(text, marker) (u) {
+    mi := index(text, marker)
+    if mi < 0 { return }
+    rest := trim(substr(text, mi + len(marker), len(text)))
+    hi := index(rest, "http")
+    if hi != 0 { return }
+    e := 0
+    while e < len(rest) {
+        ch := substr(rest, e, e + 1)
+        if ch == " " { break }
+        if ch == "\n" { break }
+        if ch == "\r" { break }
+        if ch == ")" { break }
+        e = e + 1
+    }
+    u = substr(rest, 0, e)
+}
+
+// audit_fetch reads the live audit state from GitHub (issue + the worker's comment
+// carrying "PR:" and "Artifact:" links), behind a 20s cache.
+func audit_fetch(n) (a) {
+    a = AuditSt{state: "unknown", iu: "", pu: "", au: ""}
+    key := "st:" + str(n)
+    cached := cache_get(key, 20)
+    if cached != "" {
+        a = parse(cached, AuditSt{})
+        return
+    }
+    status, ib, herr := http_request("GET", gh_api() + "/issues/" + str(n), gh_hdrs(), "")
+    if herr != "" { return }
+    if status != 200 { return }
+    a.state = jfield(ib, ".state")
+    a.iu = jfield(ib, ".html_url")
+    cstatus, cb, cerr := http_request("GET", gh_api() + "/issues/" + str(n) + "/comments", gh_hdrs(), "")
+    if cerr == "" {
+        if cstatus == 200 {
+            comments := parse(cb, []IComment{})
+            for _, cm := range comments {
+                pu := find_url(cm.body, "PR:")
+                if pu != "" { a.pu = pu }
+                au := find_url(cm.body, "Artifact:")
+                if au != "" { a.au = au }
+            }
+        }
+    }
+    cache_put(key, audit_json(a))
+}
+
+func audit_json(a) (s) {
+    s = "{\"state\":" + json(a.state) + ",\"iu\":" + json(a.iu) + ",\"pu\":" + json(a.pu) + ",\"au\":" + json(a.au) + "}"
+}
+
+// ---- audit routes ----
+
+func api_create(req) (res) {
+    if gh_token == "" {
+        return response("503 Service Unavailable", "text/plain; charset=utf-8", "Service non configuré (CVBOOST_GH_TOKEN manquant).")
+    }
+    profile := form_field(req.body, "profile")
+    if len(profile) < 200 {
+        return bad_request("Profil trop court — collez au moins le titre, la section À propos et une expérience (200 caractères minimum).")
+    }
+    if len(profile) > 20000 {
+        return bad_request("Profil trop long (20 000 caractères maximum).")
+    }
+    if rate_allow(client_ip(req)) == 0 {
+        return response("429 Too Many Requests", "text/plain; charset=utf-8", "Limite atteinte : 3 audits par heure et par adresse. Réessayez plus tard.")
+    }
+    c := create_issue(profile)
+    if c.errmsg != "" {
+        return response("502 Bad Gateway", "text/plain; charset=utf-8", "Création de l'audit impossible (" + c.errmsg + "). Réessayez dans un instant.")
+    }
+    res = redirect("/audit/" + str(c.n))
+}
+
+// audit_page SSRs the live status (works with JS off — reload to refresh), then the
+// wasm client takes over and polls every 10s.
+func audit_page(n) (h) {
+    a := audit_fetch(n)
+    b := "<section><div class=wrap>"
+    b = b + "<h2>Audit #" + str(n) + "</h2>"
+    b = b + "<p class=sub>Votre audit est réalisé en public par un agent autonome. Cette page se met à jour toute seule — sans JavaScript, rechargez-la.</p>"
+    b = b + "<div class=form-card><div id=status>" + status_html(a.state, a.iu, a.pu, a.au) + "</div></div>"
+    b = b + "</div></section>"
+    b = b + "<script>window.__ISSUE=" + str(n) + "</script>"
+    b = b + "<script type=module>" + host_js() + "</script>"
+    h = layout(
+        "Audit #" + str(n) + " — CVBoost",
+        "Suivi en direct de l'audit LinkedIn #" + str(n) + " : issue GitHub, pull request et rapport final.",
+        "/audit/" + str(n), b)
+}
+
 // ---------- SEO plumbing ----------
 
 func robots_txt() (s) {
-    s = "User-agent: *\nAllow: /\nSitemap: " + base_url + "/sitemap.xml\n"
+    s = "User-agent: *\nAllow: /\nSitemap: " + site_url + "/sitemap.xml\n"
 }
 
 func sitemap_xml() (s) {
     s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
     s = s + "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
-    s = s + "<url><loc>" + base_url + "/</loc></url>"
-    s = s + "<url><loc>" + base_url + "/audit</loc></url>"
+    s = s + "<url><loc>" + site_url + "/</loc></url>"
+    s = s + "<url><loc>" + site_url + "/audit</loc></url>"
     s = s + "</urlset>"
 }
 
@@ -166,9 +356,16 @@ func handle(req) (res) {
     if req.path == "/robots.txt" { return ok_text(robots_txt()) }
     if req.path == "/sitemap.xml" { return response("200 OK", "application/xml", sitemap_xml()) }
     if req.path == "/audit" { return ok_html(audit_form()) }
+    if req.method == "GET" && has_prefix(req.path, "/audit/") {
+        n := path_num(req.path, "/audit/")
+        if n >= 0 { return ok_html(audit_page(n)) }
+    }
     if req.method == "POST" && has_prefix(req.path, "/api/audit") {
-        // M2 wires this to the GitHub issue pipeline.
-        return response("503 Service Unavailable", "text/plain; charset=utf-8", "Bientôt disponible — le pipeline d'audit arrive.")
+        return api_create(req)
+    }
+    if req.method == "GET" && has_prefix(req.path, "/api/audit/") {
+        n2 := path_num(req.path, "/api/audit/")
+        if n2 >= 0 { return ok_json(audit_json(audit_fetch(n2))) }
     }
     if req.path == "/" { return ok_html(landing()) }
     return not_found()
@@ -178,13 +375,23 @@ func main() {
     fs := new_flags("cvboost")
     fs = flag_int(fs, "port", "p", "48120", "HTTP port to listen on")
     fs = flag_str(fs, "base-url", "b", "https://cvboost.intrane.fr", "canonical base URL (SEO tags, sitemap)")
+    fs = flag_str(fs, "repo", "r", "javimosch/cvboost-audits", "GitHub repo receiving audit issues")
+    fs = flag_str(fs, "db", "d", "cvboost.db", "SQLite path (rate limit + status cache)")
+    fs = flag_bool(fs, "trust-proxy", "t", "trust X-Forwarded-* headers (behind Traefik/nginx)")
     fs = parse_flags(fs, args())
     if flag_on(fs, "help") {
         println(flag_usage(fs))
         return
     }
-    base_url = flag_get(fs, "base-url")
+    site_url = flag_get(fs, "base-url")
+    gh_repo = flag_get(fs, "repo")
+    gh_token = env("CVBOOST_GH_TOKEN")
+    if gh_token == "" { println("warn: CVBOOST_GH_TOKEN unset — audit creation disabled") }
+    db_init(flag_get(fs, "db"))
+    if flag_on(fs, "trust-proxy") { set_trust_proxy(1) }
+    set_max_body(64 * 1024)
+    set_read_timeout(10000)
     port := flag_int_val(fs, "port")
-    println("cvboost on http://localhost:" + str(port))
+    println("cvboost on http://localhost:" + str(port) + " (repo " + gh_repo + ")")
     serve(port, func(req) { return handle(req) })
 }

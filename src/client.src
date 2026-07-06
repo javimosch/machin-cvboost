@@ -1,7 +1,37 @@
-// client.src — the wasm client. M1 is pure SSR (the marketing pages need no JS);
-// this stub keeps the wasm build green. M2 turns it into the audit status page:
-// signals over the audit state, polling /api/audit/<n> and patching the timeline.
+// client.src — the wasm client: the live audit status page. The host seeds the
+// issue number and calls tick() every 10s; MFL drives the poll itself via the
+// returning http_get effect import, parses the JSON, and re-renders the shared
+// status_html (the same markup the server SSR'd — isomorphic).
+
+extern "env" {
+    fn http_get(string) string      // returning effect import: sync XHR in the host
+}
+
+var issue = 0 - 1
+
+// alloc_export lets the host write a returned string into wasm memory (the alloc
+// builtin is not exported by default — without this, returning imports crash).
+export func alloc_export(n) (p) { p = alloc(n) }
+
+export func seed_issue(n) { issue = n }
+
+// tick polls the audit status once; returns 1 when the audit is done (the host
+// then stops the interval).
+export func tick() (done) {
+    done = 0
+    if issue < 0 { return }
+    body := http_get("/api/audit/" + str(issue))
+    if body == "" { return }
+    st := jfield(body, ".state")
+    iu := jfield(body, ".iu")
+    pu := jfield(body, ".pu")
+    au := jfield(body, ".au")
+    dom_mount("status", status_html(st, iu, pu, au))
+    if st == "closed" {
+        if au != "" { done = 1 }
+    }
+}
 
 export func start() {
-    // nothing to hydrate yet — the landing and form pages are fully server-rendered
+    // the page is SSR'd; the first re-render happens on the first tick
 }

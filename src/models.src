@@ -19,6 +19,40 @@ func crit_name(i) (s) { s = crit_names[i] }
 
 func crit_desc(i) (s) { s = crit_descs[i] }
 
+// unq strips the quotes off a raw JSON string token (json_get returns "Ada" quoted).
+func unq(s) (o) {
+    o = s
+    if len(s) >= 2 {
+        if has_prefix(s, "\"") { o = substr(s, 1, len(s) - 1) }
+    }
+}
+
+// jfield reads one string field out of a JSON document ("" when absent).
+func jfield(doc, path) (v) {
+    v = ""
+    raw, err := json_get(doc, path)
+    if err == "" { v = unq(raw) }
+}
+
+// status_html renders the live audit status block — SHARED: the server SSRs it and
+// the wasm client re-renders the exact same markup on every poll (isomorphic).
+func status_html(state, iu, pu, au) (h) {
+    lbl := "État inconnu — réessayez dans un instant."
+    if state == "open" {
+        lbl = "⏳ Audit en cours — un agent autonome mago va prendre votre demande d'ici quelques minutes. Suivez son travail en direct via les liens ci-dessous."
+        if pu != "" { lbl = "🔀 Rapport rédigé — la pull request est en relecture par l'agent réviseur." }
+    }
+    if state == "closed" {
+        lbl = "Cette demande est close."
+        if au != "" { lbl = "✅ Audit terminé ! Votre rapport est prêt." }
+    }
+    h = "<p class=state>" + lbl + "</p><div class=linkrow>"
+    if au != "" { h = h + "<a class=\"btn big\" href=\"" + au + "\">📄 Voir mon rapport</a>" }
+    if iu != "" { h = h + "<a class=\"btn ghost\" href=\"" + iu + "\">📋 Issue GitHub</a>" }
+    if pu != "" { h = h + "<a class=\"btn ghost\" href=\"" + pu + "\">🔀 Pull request</a>" }
+    h = h + "</div>"
+}
+
 // ints_csv joins an int slice as "a,b,c".
 func ints_csv(xs) (s) {
     s = ""

@@ -11,6 +11,8 @@ func styles() (s) {
     s = s + ".nav .links{display:flex;gap:18px;flex:1;font-size:14px}.nav .links a{color:var(--mut)}"
     s = s + ".btn{display:inline-block;padding:11px 20px;border-radius:10px;background:var(--acc);color:#fff;font-weight:700;font-size:15px;border:0;cursor:pointer}"
     s = s + ".btn:hover{background:#372cb0;text-decoration:none}.btn.big{padding:14px 28px;font-size:17px}"
+    s = s + ".btn.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}.btn.ghost:hover{background:var(--tint)}"
+    s = s + ".state{font-size:16px;margin:0 0 18px}.linkrow{display:flex;gap:12px;flex-wrap:wrap}"
     s = s + ".hero{padding:72px 0 56px;text-align:center;background:radial-gradient(80% 100% at 50% 0%,var(--tint) 0%,#fff 100%)}"
     s = s + ".hero h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em}"
     s = s + ".hero p.lead{font-size:19px;color:var(--mut);max-width:640px;margin:0 auto 28px}"
