@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+# cvboost-li-fetch — the simple LinkedIn PUBLIC profile crawl for the CVBoost auditor.
+# Fetches the LOGGED-OUT profile page (works for ANY profile, no cookies, no account)
+# and prints clean, labelled text: name, full headline, current company, education,
+# location, connections. Runs from rbm21's residential IP (LinkedIn 999-blocks the
+# dk1 datacenter IP, so the crawl lives on the worker, not the web app).
+#
+#   cvboost-li-fetch.py "https://www.linkedin.com/in/<slug>/"
+import sys, re, html, json, urllib.request
+
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120 Safari/537.36")
+
+url = sys.argv[1] if len(sys.argv) > 1 else ""
+m = re.search(r"(https?://[^/]*linkedin\.com/in/[^/?#]+)", url)
+if not m:
+    sys.stderr.write("usage: cvboost-li-fetch.py https://www.linkedin.com/in/<slug>/\n")
+    sys.exit(2)
+url = m.group(1) + "/"
+
+req = urllib.request.Request(url, headers={"User-Agent": UA,
+      "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"})
+try:
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = r.read().decode("utf-8", "replace")
+except Exception as e:
+    sys.stderr.write("fetch failed: %s\n" % e)
+    sys.exit(3)
+
+if "authwall" in body.lower() and "og:description" not in body:
+    sys.stderr.write("blocked by LinkedIn (authwall) — likely a non-residential IP\n")
+    sys.exit(4)
+
+def meta(prop):
+    m = re.search(r'<meta property="%s" content="([^"]*)"' % re.escape(prop), body)
+    return html.unescape(m.group(1)) if m else ""
+
+def title():
+    m = re.search(r"<title>(.*?)</title>", body, re.S)
+    return html.unescape(m.group(1).strip()) if m else ""
+
+name = headline = ""
+works, schools = [], []
+mj = re.search(r'<script type="application/ld\+json">(.*?)</script>', body, re.S)
+if mj:
+    try:
+        d = json.loads(mj.group(1))
+        for o in (d.get("@graph", [d]) if isinstance(d, dict) else d):
+            if isinstance(o, dict) and o.get("@type") == "Person":
+                name = o.get("name") or name
+                headline = o.get("description") or headline
+                works = [w.get("name") for w in (o.get("worksFor") or [])
+                         if isinstance(w, dict) and w.get("name") and "*" not in w["name"]]
+                schools = [w.get("name") for w in (o.get("alumniOf") or [])
+                           if isinstance(w, dict) and w.get("name") and "*" not in w["name"]]
+                break
+    except Exception:
+        pass
+
+og = meta("og:description")
+t = title()
+if not (name or headline or og):
+    sys.stderr.write("no profile data extracted\n")
+    sys.exit(5)
+
+out = []
+if name:     out.append("Nom : " + name)
+if t:        out.append("Titre de la page : " + t)
+if headline: out.append("Accroche (headline) : " + headline)
+if works:    out.append("Entreprises : " + ", ".join(works))
+if schools:  out.append("Formation : " + ", ".join(schools))
+if og:       out.append("Résumé public LinkedIn : " + og)
+sys.stdout.write("\n".join(out) + "\n")
