@@ -65,7 +65,7 @@ func how_it_works() (h) {
     h = h + "<h2>Comment ça marche</h2>"
     h = h + "<p class=sub>Trois étapes, zéro inscription. Vous suivez le travail de l'agent en direct sur GitHub.</p>"
     h = h + "<div class=steps>"
-    h = h + "<div class=step><span class=k>1 · Gratuit</span><h3>Collez votre profil</h3><p>Le texte de votre titre, votre section À propos et vos expériences. Il est publié dans une issue GitHub publique — ne collez rien de privé.</p></div>"
+    h = h + "<div class=step><span class=k>1 · Gratuit</span><h3>Collez l'adresse de votre profil</h3><p>Juste l'URL de votre profil LinkedIn. On récupère les infos publiques automatiquement (et vous pouvez coller le texte complet pour aller plus loin).</p></div>"
     h = h + "<div class=step><span class=k>2 · ~5 minutes</span><h3>Un agent mago l'analyse</h3><p>Un agent autonome prend l'issue, évalue les 6 critères et ouvre une pull request avec votre rapport. Vous pouvez le regarder travailler.</p></div>"
     h = h + "<div class=step><span class=k>3 · Votre rapport</span><h3>Score, diagnostic, actions</h3><p>Score global sur 100, 6 sous-scores, un diagnostic en 3 phrases et des actions concrètes — plus un rapport HTML partageable.</p></div>"
     h = h + "</div></div></section>"
@@ -129,16 +129,21 @@ func landing() (h) {
 func audit_form() (h) {
     b := "<section><div class=wrap>"
     b = b + "<h2>Auditer mon profil LinkedIn</h2>"
-    b = b + "<p class=sub>Collez le texte de votre profil : titre, section À propos, expériences. Plus c'est complet, plus l'audit est précis.</p>"
+    b = b + "<p class=sub>Collez l'adresse de votre profil. On récupère automatiquement les infos publiques et un agent autonome les audite.</p>"
     b = b + "<div class=form-card>"
-    b = b + "<div class=notice><span>⚠️</span><span><b>Votre texte sera publié dans une issue GitHub publique</b> — c'est ce qui rend l'audit traçable. Ne collez pas d'informations privées (email, téléphone, adresse). Les profils LinkedIn sont déjà publics, mais relisez avant d'envoyer.</span></div>"
+    b = b + "<div class=notice><span>⚠️</span><span><b>Votre demande devient une issue GitHub publique</b> — c'est ce qui rend l'audit traçable. Ne collez pas d'informations privées (email, téléphone, adresse).</span></div>"
     b = b + "<form method=post action=\"/api/audit\">"
-    b = b + "<textarea name=profile required minlength=200 placeholder=\"Titre :\nDéveloppeur Full-Stack | React &amp; Node.js\n\nÀ propos :\nPassionné par...\n\nExpériences :\n...\"></textarea>"
-    b = b + "<p style=\"margin:16px 0 0;text-align:center\"><button class=\"btn big\" type=submit>Lancer l'audit gratuit</button></p>"
+    b = b + "<label class=fl for=url>Adresse de votre profil LinkedIn</label>"
+    b = b + "<input class=inp id=url name=url type=url required placeholder=\"https://www.linkedin.com/in/votre-nom/\" pattern=\".*linkedin\\.com/in/.*\">"
+    b = b + "<details class=deep><summary>Auditer plus en profondeur (recommandé)</summary>"
+    b = b + "<p class=hint>Le profil public ne montre que le titre, les entreprises et la formation. Pour un audit complet (section <i>À propos</i> + expériences détaillées) : ouvrez votre profil, faites <kbd>Ctrl</kbd>+<kbd>A</kbd> puis <kbd>Ctrl</kbd>+<kbd>C</kbd>, et collez tout ci-dessous. Optionnel.</p>"
+    b = b + "<textarea name=profile placeholder=\"(Optionnel) Collez ici le texte complet de votre profil pour un audit détaillé…\"></textarea>"
+    b = b + "</details>"
+    b = b + "<p style=\"margin:18px 0 0;text-align:center\"><button class=\"btn big\" type=submit>Lancer l'audit gratuit</button></p>"
     b = b + "</form></div></div></section>"
     h = layout(
         "Lancer un audit — CVBoost",
-        "Collez le texte de votre profil LinkedIn et recevez un audit complet réalisé en public par un agent autonome : score sur 100, 6 critères, plan d'action.",
+        "Entrez l'adresse de votre profil LinkedIn et recevez un audit complet réalisé en public par un agent autonome : score sur 100, 6 critères, plan d'action.",
         "/audit",
         b)
 }
@@ -225,11 +230,110 @@ func cache_put(k, body) {
 
 // create_issue files the audit request as a public GitHub issue (label cvboost —
 // that's what the mago worker watches).
-func create_issue(profile) (c) {
+// canon_li normalizes a LinkedIn profile URL to https://www.linkedin.com/in/<slug>/,
+// or "" if it isn't a /in/ profile URL.
+func canon_li(raw) (u) {
+    s := trim(raw)
+    i := index(s, "linkedin.com/in/")
+    if i < 0 { return }
+    rest := substr(s, i + len("linkedin.com/in/"), len(s))
+    // slug ends at the next / ? # or space
+    e := 0
+    while e < len(rest) {
+        ch := substr(rest, e, e + 1)
+        if ch == "/" { break }
+        if ch == "?" { break }
+        if ch == "#" { break }
+        if ch == " " { break }
+        e = e + 1
+    }
+    slug := substr(rest, 0, e)
+    if len(slug) == 0 { return }
+    u = "https://www.linkedin.com/in/" + slug + "/"
+}
+
+// meta_content pulls the `content="..."` of the first tag matching `marker`
+// (e.g. a `property=og:description` meta), HTML-unescaped enough for our needs.
+func meta_content(html, marker) (v) {
+    mi := index(html, marker)
+    if mi < 0 { return }
+    rest := substr(html, mi, len(html))
+    ci := index(rest, "content=\"")
+    if ci < 0 { return }
+    rest = substr(rest, ci + 9, len(rest))
+    end := index(rest, "\"")
+    if end < 0 { return }
+    v = html_unescape(substr(rest, 0, end))
+}
+
+func tag_text(html, tag) (v) {
+    o := index(html, "<" + tag)
+    if o < 0 { return }
+    rest := substr(html, o, len(html))
+    gt := index(rest, ">")
+    if gt < 0 { return }
+    rest = substr(rest, gt + 1, len(rest))
+    end := index(rest, "</" + tag + ">")
+    if end < 0 { return }
+    v = html_unescape(trim(substr(rest, 0, end)))
+}
+
+func html_unescape(s) (o) {
+    o = replace(s, "&amp;", "&")
+    o = replace(o, "&#39;", "'")
+    o = replace(o, "&#x27;", "'")
+    o = replace(o, "&quot;", "\"")
+    o = replace(o, "&lt;", "<")
+    o = replace(o, "&gt;", ">")
+    o = replace(o, "&middot;", "·")
+}
+
+// fetch_li_public GETs the LOGGED-OUT public profile page and extracts the signal
+// LinkedIn exposes to everyone: the <title> (name + current role) and og:description
+// (headline · Experience · Education · Location · connections). No cookies, no
+// account — works for any profile. Returns "" on failure.
+func fetch_li_public(url) (txt) {
+    ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    st, body, err := http_request("GET", url, []string{"User-Agent: " + ua, "Accept-Language: fr-FR,fr;q=0.9,en;q=0.8"}, "")
+    if err != "" { return }
+    if st != 200 { return }
+    title := tag_text(body, "title")
+    og := meta_content(body, "property=\"og:description\"")
+    // the JSON-LD "description" holds the full, untruncated headline
+    headline := ""
+    li := index(body, "application/ld+json")
+    if li >= 0 {
+        blk := substr(body, li, li + 4000)
+        di := index(blk, "\"description\":\"")
+        if di >= 0 {
+            drest := substr(blk, di + 14, len(blk))
+            de := index(drest, "\"")
+            if de >= 0 { headline = html_unescape(substr(drest, 0, de)) }
+        }
+    }
+    if title == "" && og == "" { return }
+    txt = ""
+    if title != "" { txt = txt + "Titre de la page : " + title + "\n" }
+    if headline != "" { txt = txt + "Accroche (headline) : " + headline + "\n" }
+    if og != "" { txt = txt + "Résumé public : " + og + "\n" }
+}
+
+// create_issue files the audit request. url is the (validated) profile URL; public is
+// what we scraped from the logged-out page; pasted is the optional full text the user
+// supplied via Ctrl+A/Ctrl+C. At least one of public/pasted is non-empty.
+func create_issue(url, public, pasted) (c) {
     c = Created{n: 0, url: "", errmsg: ""}
-    safe := replace(profile, "```", "'''")
     title := "Audit LinkedIn — demande du " + time_format(now(), "%d/%m/%Y %H:%M")
-    ibody := "**Demande d'audit CVBoost** (via cvboost.intrane.fr)\n\n## Profil à auditer\n\n```\n" + safe + "\n```\n"
+    ibody := "**Demande d'audit CVBoost** (via cvboost.intrane.fr)\n\n"
+    ibody = ibody + "**Profil :** " + url + "\n\n"
+    if public != "" {
+        ibody = ibody + "## Données publiques (récupérées automatiquement)\n\n```\n" + replace(public, "```", "'''") + "\n```\n\n"
+    }
+    if pasted != "" {
+        ibody = ibody + "## Profil complet (collé par l'utilisateur)\n\n```\n" + replace(pasted, "```", "'''") + "\n```\n"
+    } else {
+        ibody = ibody + "_Aucun texte complet fourni — auditez à partir des données publiques ci-dessus et signalez ce qui n'a pas pu être évalué._\n"
+    }
     // labels: "cvboost" scopes the mago backlog (MAGO_TASK_LABEL); "project:cvboost-audits"
     // routes the task to the registered project so the deliverable is a PR to this repo.
     payload := "{\"title\":" + json(title) + ",\"body\":" + json(ibody) + ",\"labels\":[\"cvboost\",\"project:cvboost-audits\"]}"
@@ -301,17 +405,23 @@ func api_create(req) (res) {
     if gh_token == "" {
         return response("503 Service Unavailable", "text/plain; charset=utf-8", "Service non configuré (CVBOOST_GH_TOKEN manquant).")
     }
-    profile := form_field(req.body, "profile")
-    if len(profile) < 200 {
-        return bad_request("Profil trop court — collez au moins le titre, la section À propos et une expérience (200 caractères minimum).")
+    url := canon_li(form_field(req.body, "url"))
+    if url == "" {
+        return bad_request("Adresse invalide — donnez l'URL de votre profil, p. ex. https://www.linkedin.com/in/votre-nom/")
     }
-    if len(profile) > 20000 {
-        return bad_request("Profil trop long (20 000 caractères maximum).")
+    pasted := form_field(req.body, "profile")
+    if len(pasted) > 20000 {
+        return bad_request("Texte collé trop long (20 000 caractères maximum).")
     }
     if rate_allow(client_ip(req)) == 0 {
         return response("429 Too Many Requests", "text/plain; charset=utf-8", "Limite atteinte : 3 audits par heure et par adresse. Réessayez plus tard.")
     }
-    c := create_issue(profile)
+    // Best-effort public scrape; the auditor still runs on the pasted text if this fails.
+    public := fetch_li_public(url)
+    if public == "" && pasted == "" {
+        return bad_request("Impossible de récupérer ce profil public. Vérifiez l'adresse, ou collez le texte de votre profil (bouton « Auditer plus en profondeur »).")
+    }
+    c := create_issue(url, public, pasted)
     if c.errmsg != "" {
         return response("502 Bad Gateway", "text/plain; charset=utf-8", "Création de l'audit impossible (" + c.errmsg + "). Réessayez dans un instant.")
     }
