@@ -4,13 +4,30 @@
 
 var site_url = "https://cvboost.intrane.fr"
 
+var si_key = "pk_f45cfeb76180a97cd48859bdfe22923e1c895d9bdbfd5768a596c24b702a1c5c"
+var si_api = "https://superinsights.coolify.intrane.fr"
+
 // ---------- layout ----------
+
+// si_scripts wires SuperInsights: automatic pageviews + autocapture, plus custom
+// events via a delegated click handler ([data-ev] → trackEvent) and a form-submit
+// hook that records which LinkedIn profile URL was audited. Loaded on every page.
+func si_scripts() (h) {
+    h = "<script src=\"" + si_api + "/sdk/superinsights.js\"></script><script>"
+    h = h + "(function(){if(!window.SuperInsights)return;"
+    h = h + "SuperInsights.init(\"" + si_key + "\",{apiUrl:\"" + si_api + "\",autocapture:{enabled:true,selectors:[\"button\",\"a.btn\"]}});"
+    // custom events on any [data-ev] element; data-ev-* become properties
+    h = h + "document.addEventListener(\"click\",function(e){var el=e.target.closest(\"[data-ev]\");if(!el)return;var p={};Object.keys(el.dataset).forEach(function(k){if(k!==\"ev\"&&k.slice(0,2)===\"ev\")p[k.slice(2).toLowerCase()]=el.dataset[k];});var m=location.pathname.match(/\\/audit\\/(\\d+)/);if(m)p.audit=m[1];try{SuperInsights.trackEvent(el.getAttribute(\"data-ev\"),p);}catch(x){}},true);"
+    // audit form submit → record the profile URL used (sendBeacon survives the nav)
+    h = h + "var f=document.querySelector(\"form[action='/api/audit']\");if(f){f.addEventListener(\"submit\",function(){var u=(f.querySelector(\"[name=url]\")||{}).value||\"\";var t=(((f.querySelector(\"[name=profile]\")||{}).value)||\"\").trim();try{SuperInsights.trackEvent(\"audit_submitted\",{profile_url:u,has_full_text:t.length>0});SuperInsights.flush&&SuperInsights.flush();}catch(x){}});}"
+    h = h + "})();</script>"
+}
 
 func site_header() (h) {
     h = "<header><div class=\"wrap nav\">"
     h = h + "<a class=logo href=\"/\">CV<b>Boost</b></a>"
     h = h + "<nav class=links><a href=\"/#comment\">Comment ça marche</a><a href=\"/#criteres\">Les 6 critères</a><a href=\"/#tarif\">Tarif</a><a href=\"/#public\">100 % public</a></nav>"
-    h = h + "<a class=btn href=\"/audit\">Auditer mon profil</a>"
+    h = h + "<a class=btn href=\"/audit\" data-ev=\"audit_cta_click\" data-ev-loc=\"nav\">Auditer mon profil</a>"
     h = h + "</div></header>"
 }
 
@@ -37,6 +54,7 @@ func layout(title, desc, path, body) (h) {
     h = h + "<meta name=twitter:card content=summary>"
     h = h + styles() + "</head><body>"
     h = h + site_header() + body + site_footer()
+    h = h + si_scripts()
     h = h + "</body></html>"
 }
 
@@ -46,7 +64,7 @@ func hero() (h) {
     h = "<div class=hero><div class=wrap>"
     h = h + "<h1>Votre profil LinkedIn vous coûte des opportunités</h1>"
     h = h + "<p class=lead>Collez votre profil, un agent autonome l'audite <b>en public</b> : score sur 100, 6 critères, diagnostic et plan d'action concret. Gratuit.</p>"
-    h = h + "<a class=\"btn big\" href=\"/audit\">Auditer mon profil — gratuit</a>"
+    h = h + "<a class=\"btn big\" href=\"/audit\" data-ev=\"audit_cta_click\" data-ev-loc=\"hero\">Auditer mon profil — gratuit</a>"
     h = h + "<p class=sub>Aucun mot de passe · Aucune inscription · Chaque audit est traçable sur GitHub</p>"
     h = h + "</div></div>"
 }
@@ -110,7 +128,7 @@ func pricing() (h) {
     h = h + "<li>Rapport HTML partageable</li>"
     h = h + "<li>Liens issue + pull request + artefact</li>"
     h = h + "</ul>"
-    h = h + "<a class=\"btn big\" href=\"/audit\">Lancer mon audit gratuit</a>"
+    h = h + "<a class=\"btn big\" href=\"/audit\" data-ev=\"audit_cta_click\" data-ev-loc=\"pricing\">Lancer mon audit gratuit</a>"
     h = h + "</div>"
     h = h + "<p class=why>Pourquoi gratuit ? CVBoost est une vitrine du workflow <a href=\"https://mago.intrane.fr\">mago</a> : les audits sont réalisés par des agents autonomes, en public. Votre audit est notre démo.</p>"
     h = h + "</div></section>"

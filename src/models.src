@@ -47,9 +47,9 @@ func status_html(state, iu, pu, au) (h) {
         if au != "" { lbl = "✅ Audit terminé ! Votre rapport est prêt." }
     }
     h = "<p class=state>" + lbl + "</p><div class=linkrow>"
-    if au != "" { h = h + "<a class=\"btn big\" href=\"" + au + "\">📄 Voir mon rapport</a>" }
-    if iu != "" { h = h + "<a class=\"btn ghost\" href=\"" + iu + "\">📋 Issue GitHub</a>" }
-    if pu != "" { h = h + "<a class=\"btn ghost\" href=\"" + pu + "\">🔀 Pull request</a>" }
+    if au != "" { h = h + "<a class=\"btn big\" href=\"" + au + "\" data-ev=\"result_link_click\" data-ev-type=\"artifact\">📄 Voir mon rapport</a>" }
+    if iu != "" { h = h + "<a class=\"btn ghost\" href=\"" + iu + "\" data-ev=\"result_link_click\" data-ev-type=\"issue\">📋 Issue GitHub</a>" }
+    if pu != "" { h = h + "<a class=\"btn ghost\" href=\"" + pu + "\" data-ev=\"result_link_click\" data-ev-type=\"pr\">🔀 Pull request</a>" }
     h = h + "</div>"
 }
 
