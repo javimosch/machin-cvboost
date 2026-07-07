@@ -252,87 +252,20 @@ func canon_li(raw) (u) {
     u = "https://www.linkedin.com/in/" + slug + "/"
 }
 
-// meta_content pulls the `content="..."` of the first tag matching `marker`
-// (e.g. a `property=og:description` meta), HTML-unescaped enough for our needs.
-func meta_content(html, marker) (v) {
-    mi := index(html, marker)
-    if mi < 0 { return }
-    rest := substr(html, mi, len(html))
-    ci := index(rest, "content=\"")
-    if ci < 0 { return }
-    rest = substr(rest, ci + 9, len(rest))
-    end := index(rest, "\"")
-    if end < 0 { return }
-    v = html_unescape(substr(rest, 0, end))
-}
-
-func tag_text(html, tag) (v) {
-    o := index(html, "<" + tag)
-    if o < 0 { return }
-    rest := substr(html, o, len(html))
-    gt := index(rest, ">")
-    if gt < 0 { return }
-    rest = substr(rest, gt + 1, len(rest))
-    end := index(rest, "</" + tag + ">")
-    if end < 0 { return }
-    v = html_unescape(trim(substr(rest, 0, end)))
-}
-
-func html_unescape(s) (o) {
-    o = replace(s, "&amp;", "&")
-    o = replace(o, "&#39;", "'")
-    o = replace(o, "&#x27;", "'")
-    o = replace(o, "&quot;", "\"")
-    o = replace(o, "&lt;", "<")
-    o = replace(o, "&gt;", ">")
-    o = replace(o, "&middot;", "·")
-}
-
-// fetch_li_public GETs the LOGGED-OUT public profile page and extracts the signal
-// LinkedIn exposes to everyone: the <title> (name + current role) and og:description
-// (headline · Experience · Education · Location · connections). No cookies, no
-// account — works for any profile. Returns "" on failure.
-func fetch_li_public(url) (txt) {
-    ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-    st, body, err := http_request("GET", url, []string{"User-Agent: " + ua, "Accept-Language: fr-FR,fr;q=0.9,en;q=0.8"}, "")
-    if err != "" { return }
-    if st != 200 { return }
-    title := tag_text(body, "title")
-    og := meta_content(body, "property=\"og:description\"")
-    // the JSON-LD "description" holds the full, untruncated headline
-    headline := ""
-    li := index(body, "application/ld+json")
-    if li >= 0 {
-        blk := substr(body, li, li + 4000)
-        di := index(blk, "\"description\":\"")
-        if di >= 0 {
-            drest := substr(blk, di + 14, len(blk))
-            de := index(drest, "\"")
-            if de >= 0 { headline = html_unescape(substr(drest, 0, de)) }
-        }
-    }
-    if title == "" && og == "" { return }
-    txt = ""
-    if title != "" { txt = txt + "Titre de la page : " + title + "\n" }
-    if headline != "" { txt = txt + "Accroche (headline) : " + headline + "\n" }
-    if og != "" { txt = txt + "Résumé public : " + og + "\n" }
-}
-
-// create_issue files the audit request. url is the (validated) profile URL; public is
-// what we scraped from the logged-out page; pasted is the optional full text the user
-// supplied via Ctrl+A/Ctrl+C. At least one of public/pasted is non-empty.
-func create_issue(url, public, pasted) (c) {
+// create_issue files the audit request. url is the (validated) profile URL; pasted is
+// the optional full text the user supplied via Ctrl+A/Ctrl+C. The worker (rbm21, a
+// residential IP) fetches the public profile itself — LinkedIn 999-blocks the dk1
+// datacenter IP, so the crawl lives on the worker, not here.
+func create_issue(url, pasted) (c) {
     c = Created{n: 0, url: "", errmsg: ""}
     title := "Audit LinkedIn — demande du " + time_format(now(), "%d/%m/%Y %H:%M")
     ibody := "**Demande d'audit CVBoost** (via cvboost.intrane.fr)\n\n"
     ibody = ibody + "**Profil :** " + url + "\n\n"
-    if public != "" {
-        ibody = ibody + "## Données publiques (récupérées automatiquement)\n\n```\n" + replace(public, "```", "'''") + "\n```\n\n"
-    }
+    ibody = ibody + "_Auditeur : récupère les données publiques avec_ `cvboost-li-fetch " + url + "`_._\n\n"
     if pasted != "" {
         ibody = ibody + "## Profil complet (collé par l'utilisateur)\n\n```\n" + replace(pasted, "```", "'''") + "\n```\n"
     } else {
-        ibody = ibody + "_Aucun texte complet fourni — auditez à partir des données publiques ci-dessus et signalez ce qui n'a pas pu être évalué._\n"
+        ibody = ibody + "_Aucun texte complet fourni — auditez à partir des données publiques et signalez ce qui n'a pas pu être évalué._\n"
     }
     // labels: "cvboost" scopes the mago backlog (MAGO_TASK_LABEL); "project:cvboost-audits"
     // routes the task to the registered project so the deliverable is a PR to this repo.
@@ -416,12 +349,7 @@ func api_create(req) (res) {
     if rate_allow(client_ip(req)) == 0 {
         return response("429 Too Many Requests", "text/plain; charset=utf-8", "Limite atteinte : 3 audits par heure et par adresse. Réessayez plus tard.")
     }
-    // Best-effort public scrape; the auditor still runs on the pasted text if this fails.
-    public := fetch_li_public(url)
-    if public == "" && pasted == "" {
-        return bad_request("Impossible de récupérer ce profil public. Vérifiez l'adresse, ou collez le texte de votre profil (bouton « Auditer plus en profondeur »).")
-    }
-    c := create_issue(url, public, pasted)
+    c := create_issue(url, pasted)
     if c.errmsg != "" {
         return response("502 Bad Gateway", "text/plain; charset=utf-8", "Création de l'audit impossible (" + c.errmsg + "). Réessayez dans un instant.")
     }
